@@ -10,14 +10,14 @@ import (
 )
 
 type forkEvent struct {
-	parentId     string
+	traceId      string
 	parentSpanId string
 	ttl          time.Time
 }
 
 type ProvEventsTranslator struct {
 	ignoredEventTypes map[ProvenanceEventType]bool
-	forkTracking      map[string]forkEvent
+	forkTracking      map[string]*forkEvent
 }
 
 func New(ignoredEventTypes []ProvenanceEventType) *ProvEventsTranslator {
@@ -27,7 +27,7 @@ func New(ignoredEventTypes []ProvenanceEventType) *ProvEventsTranslator {
 	}
 
 	return &ProvEventsTranslator{
-		forkTracking:      make(map[string]forkEvent),
+		forkTracking:      make(map[string]*forkEvent),
 		ignoredEventTypes: ignored,
 	}
 }
@@ -67,32 +67,30 @@ func (t *ProvEventsTranslator) TranslateProvenanceEvents(events []ProvenanceEven
 			newSpan.SetKind(ptrace.SpanKindInternal)
 		}
 
-		if event.EventType == ProvenanceEventTypeJoin && len(event.ParentIds) > 0 {
-			for _, parentID := range event.ParentIds {
-				t.forkTracking[parentID] = forkEvent{
-					parentId:     event.EntityId,
-					parentSpanId: event.EventId,
-					ttl:          time.Now().Add(5 * time.Minute),
-				}
-			}
-		}
-
 		if event.EventType == ProvenanceEventTypeFork && len(event.ChildIds) > 0 {
+      fe := &forkEvent{
+        traceId:      event.EntityId,
+        parentSpanId: event.EventId,
+        ttl:          time.Now().Add(5 * time.Minute),
+      }
+
 			for _, childId := range event.ChildIds {
-				t.forkTracking[childId] = forkEvent{
-					parentId:     event.EntityId,
-					parentSpanId: event.EventId,
-					ttl:          time.Now().Add(5 * time.Minute),
-				}
+        parent, ok := t.forkTracking[event.EntityId]
+        if ok {
+          fe.traceId = parent.traceId
+        }
+
+				t.forkTracking[childId] = fe
 			}
 		}
 
 		spanID := event.EventId
 		traceID := event.EntityId
-		forkEvent, ok := t.forkTracking[event.EntityId]
+
+		rootEntity, ok := t.forkTracking[event.EntityId]
 		if ok {
-			traceID = forkEvent.parentId
-			newSpan.SetParentSpanID(uuidToSpanID(forkEvent.parentSpanId))
+			traceID = rootEntity.traceId
+			newSpan.SetParentSpanID(uuidToSpanID(rootEntity.parentSpanId))
 		}
 
 		newSpan.SetSpanID(uuidToSpanID(spanID))
