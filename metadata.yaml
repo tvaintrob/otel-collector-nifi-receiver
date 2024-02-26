@@ -1,0 +1,9 @@
+type: nifi
+
+status:
+  class: receiver
+  stability:
+    development: [traces]
+  distributions: []
+  codeowners:
+    active: [tvaintrob]
