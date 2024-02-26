@@ -10,7 +10,7 @@ receivers:
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/prometheusreceiver v0.95.0
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/kafkareceiver v0.95.0
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/datadogreceiver v0.95.0
-  - gomod: github.com/tvaintrob/otel-collector-nifi-receiver v0.1.0
+  - gomod: github.com/tvaintrob/otel-collector-nifi-receiver v0.1.1
     name: nifireceiver
 exporters:
   - gomod: go.opentelemetry.io/collector/exporter/debugexporter v0.95.0
