@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/tvaintrob/otel-collector-nifi-receiver/internal/metadata"
+	"github.com/tvaintrob/otel-collector-nifi-receiver/internal/translator"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/receiver"
@@ -22,6 +23,7 @@ type nifiReceiver struct {
 	nextConsumer consumer.Traces
 	server       *http.Server
 	tReceiver    *receiverhelper.ObsReport
+	translator   *translator.ProvEventsTranslator
 }
 
 func newNifiReceiver(config *Config, nextConsumer consumer.Traces, params receiver.CreateSettings) (receiver.Traces, error) {
@@ -40,6 +42,7 @@ func newNifiReceiver(config *Config, nextConsumer consumer.Traces, params receiv
 		nextConsumer: nextConsumer,
 		server:       &http.Server{},
 		tReceiver:    instance,
+		translator:   translator.New(config.IgnoredEventTypes),
 	}, nil
 }
 
@@ -78,20 +81,20 @@ func (r *nifiReceiver) handleTraces(w http.ResponseWriter, req *http.Request) {
 	obsCtx := r.tReceiver.StartTracesOp(req.Context())
 	var err error
 	var spanCount int
-	var provenanceEventBatch ProvenanceEventBatch
+	var provenanceEvents []translator.ProvenanceEvent
 	defer func(spanCount *int) {
 		r.tReceiver.EndTracesOp(obsCtx, metadata.Type.String(), *spanCount, err)
 	}(&spanCount)
 
 	jsonDecoder := json.NewDecoder(req.Body)
-	err = jsonDecoder.Decode(&provenanceEventBatch)
+	err = jsonDecoder.Decode(&provenanceEvents)
 	if err != nil {
 		http.Error(w, "Failed to decode JSON", http.StatusBadRequest)
 		r.params.Logger.Error("Failed to decode JSON", zap.Error(err))
 		return
 	}
 
-	traces := toTraceData(provenanceEventBatch)
+	traces := r.translator.TranslateProvenanceEvents(provenanceEvents)
 	spanCount = traces.SpanCount()
 	err = r.nextConsumer.ConsumeTraces(obsCtx, traces)
 	if err != nil {
@@ -100,5 +103,6 @@ func (r *nifiReceiver) handleTraces(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-  _, _ = w.Write([]byte("OK"))
+	r.translator.Cleanup()
+	_, _ = w.Write([]byte("OK"))
 }

@@ -9,6 +9,7 @@ import (
 	"go.opentelemetry.io/collector/receiver"
 
 	"github.com/tvaintrob/otel-collector-nifi-receiver/internal/metadata"
+	"github.com/tvaintrob/otel-collector-nifi-receiver/internal/translator"
 )
 
 // NewFactory creates a factory for DataDog receiver.
@@ -23,6 +24,9 @@ func createDefaultConfig() component.Config {
 	return &Config{
 		ServerConfig: confighttp.ServerConfig{
 			Endpoint: "localhost:8200",
+		},
+		IgnoredEventTypes: []translator.ProvenanceEventType{
+			translator.ProvenanceEventTypeDownload,
 		},
 	}
 }

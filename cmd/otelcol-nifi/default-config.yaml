@@ -1,16 +1,22 @@
 receivers:
   nifi:
     endpoint: 0.0.0.0:8200
+    ignored_events:
+      - DOWNLOAD
 
 processors:
   batch:
 
 exporters:
   debug:
+  otlp:
+    endpoint: localhost:4317
+    tls:
+      insecure: true
 
 service:
   pipelines:
     traces:
       receivers: [nifi]
-      processors: [batch]
-      exporters: [debug]
+      processors: []
+      exporters: [debug, otlp]
