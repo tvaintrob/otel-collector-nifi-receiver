@@ -4,6 +4,7 @@ RUN apk --update add ca-certificates
 RUN mkdir -p /tmp
 
 FROM golang:1.21-alpine as builder
+RUN apk add --no-cache make
 WORKDIR /app
 COPY . .
 RUN make otelcol-nifi
