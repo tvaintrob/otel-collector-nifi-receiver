@@ -2,17 +2,17 @@ package nifireceiver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 
+	"github.com/tvaintrob/otel-collector-nifi-receiver/internal/metadata"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/receiver"
 	"go.opentelemetry.io/collector/receiver/receiverhelper"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
 
 type nifiReceiver struct {
@@ -78,20 +78,27 @@ func (r *nifiReceiver) handleTraces(w http.ResponseWriter, req *http.Request) {
 	obsCtx := r.tReceiver.StartTracesOp(req.Context())
 	var err error
 	var spanCount int
+	var provenanceEventBatch ProvenanceEventBatch
 	defer func(spanCount *int) {
-		r.tReceiver.EndTracesOp(obsCtx, "datadog", *spanCount, err)
+		r.tReceiver.EndTracesOp(obsCtx, metadata.Type.String(), *spanCount, err)
 	}(&spanCount)
 
-	body, err := io.ReadAll(req.Body)
+	jsonDecoder := json.NewDecoder(req.Body)
+	err = jsonDecoder.Decode(&provenanceEventBatch)
 	if err != nil {
-		r.params.Logger.Error("Error reading request body", zap.Error(err))
-		w.WriteHeader(http.StatusInternalServerError)
+		http.Error(w, "Failed to decode JSON", http.StatusBadRequest)
+		r.params.Logger.Error("Failed to decode JSON", zap.Error(err))
 		return
 	}
 
-	r.params.Logger.Log(zapcore.InfoLevel, "Handling nifi provenance data",
-		zap.String("method", req.Method),
-		zap.String("path", req.URL.Path),
-		zap.String("body", string(body)),
-	)
+	traces := toTraceData(provenanceEventBatch)
+	spanCount = traces.SpanCount()
+	err = r.nextConsumer.ConsumeTraces(obsCtx, traces)
+	if err != nil {
+		http.Error(w, "Failed to consume traces", http.StatusInternalServerError)
+		r.params.Logger.Error("Failed to consume traces", zap.Error(err))
+		return
+	}
+
+  _, _ = w.Write([]byte("OK"))
 }
