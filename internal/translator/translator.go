@@ -16,31 +16,31 @@ type forkEvent struct {
 }
 
 type ProvEventsTranslator struct {
-	ignoredEventTypes []ProvenanceEventType
+	ignoredEventTypes map[ProvenanceEventType]bool
 	forkTracking      map[string]forkEvent
 }
 
 func New(ignoredEventTypes []ProvenanceEventType) *ProvEventsTranslator {
+	ignored := make(map[ProvenanceEventType]bool)
+	for _, eventType := range ignoredEventTypes {
+		ignored[eventType] = true
+	}
+
 	return &ProvEventsTranslator{
 		forkTracking:      make(map[string]forkEvent),
-		ignoredEventTypes: ignoredEventTypes,
+		ignoredEventTypes: ignored,
 	}
+}
+
+func (t *ProvEventsTranslator) shouldIgnore(eventType ProvenanceEventType) bool {
+	_, ok := t.ignoredEventTypes[eventType]
+	return ok
 }
 
 func (t *ProvEventsTranslator) TranslateProvenanceEvents(events []ProvenanceEvent) ptrace.Traces {
 	groupByService := make(map[string]ptrace.SpanSlice)
 	for _, event := range events {
-		shouldIgnore := false
-		// Check if this event type is ignored
-		// TODO: this can be optimized using a map
-		for _, ignored := range t.ignoredEventTypes {
-			if event.EventType == ignored {
-				shouldIgnore = true
-				break
-			}
-		}
-
-		if shouldIgnore {
+		if t.shouldIgnore(event.EventType) {
 			continue
 		}
 
@@ -67,8 +67,17 @@ func (t *ProvEventsTranslator) TranslateProvenanceEvents(events []ProvenanceEven
 			newSpan.SetKind(ptrace.SpanKindInternal)
 		}
 
-		// check if the flow forked
-		if event.ChildIds != nil && len(event.ChildIds) > 0 {
+		if event.EventType == ProvenanceEventTypeJoin && len(event.ParentIds) > 0 {
+			for _, parentID := range event.ParentIds {
+				t.forkTracking[parentID] = forkEvent{
+					parentId:     event.EntityId,
+					parentSpanId: event.EventId,
+					ttl:          time.Now().Add(5 * time.Minute),
+				}
+			}
+		}
+
+		if event.EventType == ProvenanceEventTypeFork && len(event.ChildIds) > 0 {
 			for _, childId := range event.ChildIds {
 				t.forkTracking[childId] = forkEvent{
 					parentId:     event.EntityId,
@@ -83,7 +92,7 @@ func (t *ProvEventsTranslator) TranslateProvenanceEvents(events []ProvenanceEven
 		forkEvent, ok := t.forkTracking[event.EntityId]
 		if ok {
 			traceID = forkEvent.parentId
-			newSpan.SetParentSpanID(uuidToSpanID(forkEvent.parentSpanId))
+      newSpan.SetParentSpanID(uuidToSpanID(forkEvent.parentSpanId))
 		}
 
 		newSpan.SetSpanID(uuidToSpanID(spanID))
