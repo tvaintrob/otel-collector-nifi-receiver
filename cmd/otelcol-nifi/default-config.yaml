@@ -1,0 +1,16 @@
+receivers:
+  nifi:
+    endpoint: 0.0.0.0:8200
+
+processors:
+  batch:
+
+exporters:
+  debug:
+
+service:
+  pipelines:
+    traces:
+      receivers: [nifi]
+      processors: [batch]
+      exporters: [debug]

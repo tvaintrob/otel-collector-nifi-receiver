@@ -18,3 +18,7 @@ lint:		## Run linter
 .PHONY: otelcol-nifi
 otelcol-nifi:		## Build otelcol-nifi distribution
 	@cd ./cmd/otelcol-nifi && go run go.opentelemetry.io/collector/cmd/builder@v0.95.0 --config=otelcol-builder.yaml
+
+.PHONY: otelcol-dev
+otelcol-dev: otelcol-nifi
+	@./cmd/otelcol-nifi/otelcol-nifi --config=./cmd/otelcol-nifi/default-config.yaml
