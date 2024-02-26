@@ -14,3 +14,7 @@ test:		## Run tests
 lint:		## Run linter
 	go vet ./...
 	golangci-lint run
+
+.PHONY: otelcol-nifi
+otelcol-nifi:		## Build otelcol-nifi distribution
+	@cd ./cmd/otelcol-nifi && go run go.opentelemetry.io/collector/cmd/builder@v0.95.0 --config=otelcol-builder.yaml
