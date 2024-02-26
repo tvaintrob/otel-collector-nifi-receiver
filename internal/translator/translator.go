@@ -92,7 +92,7 @@ func (t *ProvEventsTranslator) TranslateProvenanceEvents(events []ProvenanceEven
 		forkEvent, ok := t.forkTracking[event.EntityId]
 		if ok {
 			traceID = forkEvent.parentId
-      newSpan.SetParentSpanID(uuidToSpanID(forkEvent.parentSpanId))
+			newSpan.SetParentSpanID(uuidToSpanID(forkEvent.parentSpanId))
 		}
 
 		newSpan.SetSpanID(uuidToSpanID(spanID))
