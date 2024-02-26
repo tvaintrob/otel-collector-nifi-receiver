@@ -13,12 +13,29 @@ import (
 	loggingexporter "go.opentelemetry.io/collector/exporter/loggingexporter"
 	otlpexporter "go.opentelemetry.io/collector/exporter/otlpexporter"
 	otlphttpexporter "go.opentelemetry.io/collector/exporter/otlphttpexporter"
+	fileexporter "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/fileexporter"
+	kafkaexporter "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/kafkaexporter"
+	prometheusexporter "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/prometheusexporter"
+	prometheusremotewriteexporter "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/prometheusremotewriteexporter"
+	elasticsearchexporter "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/elasticsearchexporter"
 	ballastextension "go.opentelemetry.io/collector/extension/ballastextension"
 	memorylimiterextension "go.opentelemetry.io/collector/extension/memorylimiterextension"
 	zpagesextension "go.opentelemetry.io/collector/extension/zpagesextension"
+	headerssetterextension "github.com/open-telemetry/opentelemetry-collector-contrib/extension/headerssetterextension"
+	healthcheckextension "github.com/open-telemetry/opentelemetry-collector-contrib/extension/healthcheckextension"
 	batchprocessor "go.opentelemetry.io/collector/processor/batchprocessor"
 	memorylimiterprocessor "go.opentelemetry.io/collector/processor/memorylimiterprocessor"
+	attributesprocessor "github.com/open-telemetry/opentelemetry-collector-contrib/processor/attributesprocessor"
+	filterprocessor "github.com/open-telemetry/opentelemetry-collector-contrib/processor/filterprocessor"
+	resourceprocessor "github.com/open-telemetry/opentelemetry-collector-contrib/processor/resourceprocessor"
+	resourcedetectionprocessor "github.com/open-telemetry/opentelemetry-collector-contrib/processor/resourcedetectionprocessor"
+	routingprocessor "github.com/open-telemetry/opentelemetry-collector-contrib/processor/routingprocessor"
+	spanprocessor "github.com/open-telemetry/opentelemetry-collector-contrib/processor/spanprocessor"
+	transformprocessor "github.com/open-telemetry/opentelemetry-collector-contrib/processor/transformprocessor"
 	otlpreceiver "go.opentelemetry.io/collector/receiver/otlpreceiver"
+	prometheusreceiver "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/prometheusreceiver"
+	kafkareceiver "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/kafkareceiver"
+	datadogreceiver "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/datadogreceiver"
 	nifireceiver "github.com/tvaintrob/otel-collector-nifi-receiver"
 )
 
@@ -30,6 +47,8 @@ func components() (otelcol.Factories, error) {
 		ballastextension.NewFactory(),
 		memorylimiterextension.NewFactory(),
 		zpagesextension.NewFactory(),
+		headerssetterextension.NewFactory(),
+		healthcheckextension.NewFactory(),
 	)
 	if err != nil {
 		return otelcol.Factories{}, err
@@ -37,6 +56,9 @@ func components() (otelcol.Factories, error) {
 
 	factories.Receivers, err = receiver.MakeFactoryMap(
 		otlpreceiver.NewFactory(),
+		prometheusreceiver.NewFactory(),
+		kafkareceiver.NewFactory(),
+		datadogreceiver.NewFactory(),
 		nifireceiver.NewFactory(),
 	)
 	if err != nil {
@@ -48,6 +70,11 @@ func components() (otelcol.Factories, error) {
 		loggingexporter.NewFactory(),
 		otlpexporter.NewFactory(),
 		otlphttpexporter.NewFactory(),
+		fileexporter.NewFactory(),
+		kafkaexporter.NewFactory(),
+		prometheusexporter.NewFactory(),
+		prometheusremotewriteexporter.NewFactory(),
+		elasticsearchexporter.NewFactory(),
 	)
 	if err != nil {
 		return otelcol.Factories{}, err
@@ -56,6 +83,13 @@ func components() (otelcol.Factories, error) {
 	factories.Processors, err = processor.MakeFactoryMap(
 		batchprocessor.NewFactory(),
 		memorylimiterprocessor.NewFactory(),
+		attributesprocessor.NewFactory(),
+		filterprocessor.NewFactory(),
+		resourceprocessor.NewFactory(),
+		resourcedetectionprocessor.NewFactory(),
+		routingprocessor.NewFactory(),
+		spanprocessor.NewFactory(),
+		transformprocessor.NewFactory(),
 	)
 	if err != nil {
 		return otelcol.Factories{}, err
