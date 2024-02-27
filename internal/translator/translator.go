@@ -68,17 +68,17 @@ func (t *ProvEventsTranslator) TranslateProvenanceEvents(events []ProvenanceEven
 		}
 
 		if event.EventType == ProvenanceEventTypeFork && len(event.ChildIds) > 0 {
-      fe := &forkEvent{
-        traceId:      event.EntityId,
-        parentSpanId: event.EventId,
-        ttl:          time.Now().Add(5 * time.Minute),
-      }
+			fe := &forkEvent{
+				traceId:      event.EntityId,
+				parentSpanId: event.EventId,
+				ttl:          time.Now().Add(5 * time.Minute),
+			}
 
 			for _, childId := range event.ChildIds {
-        parent, ok := t.forkTracking[event.EntityId]
-        if ok {
-          fe.traceId = parent.traceId
-        }
+				parent, ok := t.forkTracking[event.EntityId]
+				if ok {
+					fe.traceId = parent.traceId
+				}
 
 				t.forkTracking[childId] = fe
 			}
