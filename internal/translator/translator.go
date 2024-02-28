@@ -2,6 +2,8 @@ package translator
 
 import (
 	"fmt"
+	"runtime/debug"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/collector/pdata/pcommon"
@@ -83,7 +85,21 @@ func (t *eventTranslator) TranslateProvenanceEvents(events []ProvenanceEvent) pt
 		newSpan.Attributes().PutStr("nifi.application", event.Application)
 
 		for key, val := range event.UpdatedAttributes {
-			newSpan.Attributes().PutStr(fmt.Sprintf("nifi.attributes.%s", key), val)
+			newSpan.Attributes().PutStr(fmt.Sprintf("nifi.attributes.%s", strings.ToLower(key)), val)
+		}
+
+		if event.EventType == ProvenanceEventTypeJoin {
+			// Add links to the parent spans, only unique links
+			spanCtxs := make(map[trace.TraceID]trace.SpanContext)
+			for _, parent := range event.ParentIds {
+				spanCtx := t.spanContextTracking[parent].spanContext
+				spanCtxs[spanCtx.TraceID()] = spanCtx
+			}
+
+			for _, spanCtx := range spanCtxs {
+				ln := newSpan.Links().AppendEmpty()
+				ln.SetTraceID(pcommon.TraceID(spanCtx.TraceID()))
+			}
 		}
 	}
 
@@ -95,7 +111,14 @@ func (t *eventTranslator) TranslateProvenanceEvents(events []ProvenanceEvent) pt
 
 		in := rs.ScopeSpans().AppendEmpty()
 		in.Scope().SetName("nifi.provenance.receiver")
-		in.Scope().SetVersion("0.1.0")
+
+		info, ok := debug.ReadBuildInfo()
+		if ok {
+			in.Scope().SetVersion(info.Main.Version)
+		} else {
+			in.Scope().SetVersion("unknown")
+		}
+
 		spans.CopyTo(in.Spans())
 	}
 
