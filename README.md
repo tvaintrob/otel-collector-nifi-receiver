@@ -16,3 +16,30 @@ To build the distribution use the `make otelcol-nifi` target
 make otelcol-nifi
 ./cmd/otelcol-nifi/otelcol-nifi --config=./cmd/otelcol-nifi/default-config.yaml
 ```
+
+## Configuration
+
+Example: 
+
+```
+receivers:
+  nifi:
+    endpoint: localhost:8200
+```
+
+### ignored_events (Optional)
+
+A list of event types to ignore, for a list of possible values see: [./internal/translator/models.go](./internal/translator/models.go)
+
+Default: 
+
+```
+ignored_events:
+  - DOWNLOAD
+```
+
+### HTTP Service Config
+
+All config params here are valid as well
+
+<https://github.com/open-telemetry/opentelemetry-collector/tree/main/config/confighttp#server-configuration>
