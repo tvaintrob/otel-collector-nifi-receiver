@@ -23,7 +23,7 @@ type nifiReceiver struct {
 	nextConsumer consumer.Traces
 	server       *http.Server
 	tReceiver    *receiverhelper.ObsReport
-	translator   *translator.ProvEventsTranslator
+	translator   translator.EventTranslator
 }
 
 func newNifiReceiver(config *Config, nextConsumer consumer.Traces, params receiver.CreateSettings) (receiver.Traces, error) {

@@ -7,96 +7,65 @@ import (
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
+	"go.opentelemetry.io/otel/trace"
 )
 
-type forkEvent struct {
-	traceId      string
-	parentSpanId string
-	ttl          time.Time
+type EventTranslator interface {
+	// TranslateProvenanceEvents translates a slice of ProvenanceEvent into a ptrace.Traces
+	TranslateProvenanceEvents(events []ProvenanceEvent) ptrace.Traces
+
+	// Cleanup cleans up the translator
+	Cleanup()
 }
 
-type ProvEventsTranslator struct {
+type spanContextTracking struct {
+	spanContext trace.SpanContext
+	ttl         time.Time
+}
+
+type eventTranslator struct {
 	ignoredEventTypes map[ProvenanceEventType]bool
-	forkTracking      map[string]*forkEvent
+
+	// Keep track of the span context for each event.EntityId
+	spanContextTracking map[string]spanContextTracking
 }
 
-func New(ignoredEventTypes []ProvenanceEventType) *ProvEventsTranslator {
-	ignored := make(map[ProvenanceEventType]bool)
+func New(ignoredEventTypes []ProvenanceEventType) EventTranslator {
+	ignoredEventsMap := make(map[ProvenanceEventType]bool)
 	for _, eventType := range ignoredEventTypes {
-		ignored[eventType] = true
+		ignoredEventsMap[eventType] = true
 	}
 
-	return &ProvEventsTranslator{
-		forkTracking:      make(map[string]*forkEvent),
-		ignoredEventTypes: ignored,
+	return &eventTranslator{
+		ignoredEventTypes:   ignoredEventsMap,
+		spanContextTracking: make(map[string]spanContextTracking),
 	}
 }
 
-func (t *ProvEventsTranslator) shouldIgnore(eventType ProvenanceEventType) bool {
-	_, ok := t.ignoredEventTypes[eventType]
-	return ok
-}
-
-func (t *ProvEventsTranslator) TranslateProvenanceEvents(events []ProvenanceEvent) ptrace.Traces {
+// TranslateProvenanceEvents translates a slice of ProvenanceEvent into a ptrace.Traces
+func (t *eventTranslator) TranslateProvenanceEvents(events []ProvenanceEvent) ptrace.Traces {
 	groupByService := make(map[string]ptrace.SpanSlice)
 	for _, event := range events {
-		if t.shouldIgnore(event.EventType) {
+		if t.shouldIgnore(event) {
 			continue
 		}
 
-		slice, exist := groupByService[event.ProcessGroupName]
+		serviceName := t.getServiceName(event)
+		slice, exist := groupByService[serviceName]
 		if !exist {
 			slice = ptrace.NewSpanSlice()
-			groupByService[event.ProcessGroupName] = slice
+			groupByService[serviceName] = slice
 		}
 
+		spanCtx := t.getSpanContext(event)
 		newSpan := slice.AppendEmpty()
-		newSpan.Status().SetCode(ptrace.StatusCodeUnset)
+		newSpan.SetTraceID(pcommon.TraceID(spanCtx.TraceID()))
+		newSpan.SetParentSpanID(pcommon.SpanID(spanCtx.SpanID()))
+		newSpan.SetSpanID(uuidToSpanID(event.EventId))
+
 		newSpan.SetName(fmt.Sprintf("%s %s", event.ComponentName, event.EventType))
-
-		switch event.EventType {
-		case ProvenanceEventTypeFetch:
-			newSpan.SetKind(ptrace.SpanKindServer)
-		case ProvenanceEventTypeReceive:
-			newSpan.SetKind(ptrace.SpanKindServer)
-		case ProvenanceEventTypeRemoteInvocation:
-			newSpan.SetKind(ptrace.SpanKindClient)
-		case ProvenanceEventTypeSend:
-			newSpan.SetKind(ptrace.SpanKindClient)
-		default:
-			newSpan.SetKind(ptrace.SpanKindInternal)
-		}
-
-		if event.EventType == ProvenanceEventTypeFork && len(event.ChildIds) > 0 {
-			fe := &forkEvent{
-				traceId:      event.EntityId,
-				parentSpanId: event.EventId,
-				ttl:          time.Now().Add(5 * time.Minute),
-			}
-
-			for _, childId := range event.ChildIds {
-				parent, ok := t.forkTracking[event.EntityId]
-				if ok {
-					fe.traceId = parent.traceId
-				}
-
-				t.forkTracking[childId] = fe
-			}
-		}
-
-		spanID := event.EventId
-		traceID := event.EntityId
-
-		rootEntity, ok := t.forkTracking[event.EntityId]
-		if ok {
-			traceID = rootEntity.traceId
-			newSpan.SetParentSpanID(uuidToSpanID(rootEntity.parentSpanId))
-		}
-
-		newSpan.SetSpanID(uuidToSpanID(spanID))
-		newSpan.SetTraceID(uuidToTraceID(traceID))
-		newSpan.SetEndTimestamp(pcommon.Timestamp((event.TimestampMillis + event.DurationMillis) * 1000000))
 		newSpan.SetStartTimestamp(pcommon.Timestamp(event.TimestampMillis * 1000000))
+		newSpan.SetEndTimestamp(pcommon.Timestamp((event.TimestampMillis + event.DurationMillis) * 1000000))
 
 		newSpan.Attributes().PutStr("nifi.event.id", event.EventId)
 		newSpan.Attributes().PutStr("nifi.event.type", string(event.EventType))
@@ -133,11 +102,70 @@ func (t *ProvEventsTranslator) TranslateProvenanceEvents(events []ProvenanceEven
 	return results
 }
 
-// Cleanup removes old fork tracking entries
-func (t *ProvEventsTranslator) Cleanup() {
-	for key, value := range t.forkTracking {
-		if time.Now().After(value.ttl) {
-			delete(t.forkTracking, key)
+func (t *eventTranslator) Cleanup() {
+	for k := range t.spanContextTracking {
+		if time.Now().After(t.spanContextTracking[k].ttl) {
+			delete(t.spanContextTracking, k)
 		}
 	}
+}
+
+// shouldIgnore returns true if the event should be ignored
+func (t *eventTranslator) shouldIgnore(event ProvenanceEvent) bool {
+	_, ok := t.ignoredEventTypes[event.EventType]
+	return ok
+}
+
+// getServiceName returns the service name for the event
+func (t *eventTranslator) getServiceName(event ProvenanceEvent) string {
+	return event.ProcessGroupName
+}
+
+// getSpanContext returns the span context for the event
+func (t *eventTranslator) getSpanContext(event ProvenanceEvent) trace.SpanContext {
+	// try to extract the span context from the event
+	spanCtx := extractTraceContext(event.UpdatedAttributes)
+	if spanCtx.IsValid() {
+		t.spanContextTracking[event.EntityId] = spanContextTracking{spanContext: spanCtx, ttl: time.Now().Add(5 * time.Minute)}
+		return spanCtx
+	}
+
+	defaultSpanCtx := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID: trace.TraceID(uuidToTraceID(event.EntityId)),
+	})
+
+	// Fork events create a new span context, keep track of it,
+	// and connect it to all the childIds of the fork event
+	if event.EventType == ProvenanceEventTypeFork {
+		var traceID [16]byte
+		parentSpanID := uuidToSpanID(event.EventId)
+		spanCtx, ok := t.spanContextTracking[event.EntityId]
+		if ok {
+			traceID = spanCtx.spanContext.TraceID()
+		} else {
+			traceID = uuidToTraceID(event.EntityId)
+		}
+
+		childSpanCtx := trace.NewSpanContext(trace.SpanContextConfig{
+			TraceID:    trace.TraceID(traceID),
+			SpanID:     trace.SpanID(parentSpanID),
+			TraceFlags: 0,
+		})
+
+		for _, childId := range event.ChildIds {
+			t.spanContextTracking[childId] = spanContextTracking{spanContext: childSpanCtx, ttl: time.Now().Add(5 * time.Minute)}
+		}
+
+		if ok {
+			return spanCtx.spanContext
+		}
+
+		return defaultSpanCtx
+	}
+
+	if ctx, ok := t.spanContextTracking[event.EntityId]; ok {
+		return ctx.spanContext
+	}
+
+	return defaultSpanCtx
 }

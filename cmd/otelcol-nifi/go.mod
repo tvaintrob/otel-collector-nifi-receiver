@@ -23,7 +23,7 @@ require (
 	github.com/open-telemetry/opentelemetry-collector-contrib/receiver/kafkareceiver v0.95.0
 	github.com/open-telemetry/opentelemetry-collector-contrib/receiver/prometheusreceiver v0.95.0
 	github.com/stretchr/testify v1.8.4
-	github.com/tvaintrob/otel-collector-nifi-receiver v0.1.0
+	github.com/tvaintrob/otel-collector-nifi-receiver v0.1.1
 	go.opentelemetry.io/collector/component v0.95.0
 	go.opentelemetry.io/collector/connector v0.95.0
 	go.opentelemetry.io/collector/exporter v0.95.0
