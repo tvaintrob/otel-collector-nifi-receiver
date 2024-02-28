@@ -5,7 +5,6 @@
 ## Open Issues
 
 - Receive bulletin data to add errors to the traces
-- Handle context propagation from listeners (expect `tracecontext` attribute)
 - Add links to `JOIN` events
 
 ## Building the distribution
