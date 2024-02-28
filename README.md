@@ -12,8 +12,11 @@
 
 To build the distribution use the `make otelcol-nifi` target
 
-```
+```bash
+# Build the distribution
 make otelcol-nifi
+
+# Run the built binary with the default config file
 ./cmd/otelcol-nifi/otelcol-nifi --config=./cmd/otelcol-nifi/default-config.yaml
 ```
 
@@ -21,7 +24,7 @@ make otelcol-nifi
 
 Example: 
 
-```
+```yaml
 receivers:
   nifi:
     endpoint: localhost:8200
@@ -33,7 +36,7 @@ A list of event types to ignore, for a list of possible values see: [./internal/
 
 Default: 
 
-```
+```yaml
 ignored_events:
   - DOWNLOAD
 ```
