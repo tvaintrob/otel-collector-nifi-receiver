@@ -16,6 +16,9 @@ type EventTranslator interface {
 	// TranslateProvenanceEvents translates a slice of ProvenanceEvent into a ptrace.Traces
 	TranslateProvenanceEvents(events []ProvenanceEvent) ptrace.Traces
 
+	// TranslateBulletinEvents translates a slice of BulletinEvent into a ptrace.Traces
+	TranslateBulletinEvents(events []BulletinEvent) ptrace.Traces
+
 	// Cleanup cleans up the translator
 	Cleanup()
 }
@@ -32,7 +35,7 @@ type eventTranslator struct {
 	spanContextTracking map[string]spanContextTracking
 }
 
-func New(ignoredEventTypes []ProvenanceEventType) EventTranslator {
+func NewProvenanceEventTranslator(ignoredEventTypes []ProvenanceEventType) EventTranslator {
 	ignoredEventsMap := make(map[ProvenanceEventType]bool)
 	for _, eventType := range ignoredEventTypes {
 		ignoredEventsMap[eventType] = true
@@ -52,6 +55,7 @@ func (t *eventTranslator) TranslateProvenanceEvents(events []ProvenanceEvent) pt
 			continue
 		}
 
+		kind := t.getSpanKind(event)
 		serviceName := t.getServiceName(event)
 		slice, exist := groupByService[serviceName]
 		if !exist {
@@ -61,6 +65,7 @@ func (t *eventTranslator) TranslateProvenanceEvents(events []ProvenanceEvent) pt
 
 		spanCtx := t.getSpanContext(event)
 		newSpan := slice.AppendEmpty()
+		newSpan.SetKind(ptrace.SpanKind(kind))
 		newSpan.SetTraceID(pcommon.TraceID(spanCtx.TraceID()))
 		newSpan.SetParentSpanID(pcommon.SpanID(spanCtx.SpanID()))
 		newSpan.SetSpanID(uuidToSpanID(event.EventId))
@@ -125,6 +130,11 @@ func (t *eventTranslator) TranslateProvenanceEvents(events []ProvenanceEvent) pt
 	return results
 }
 
+// TranslateBulletinEvents translates a slice of BulletinEvent into a ptrace.Traces
+func (t *eventTranslator) TranslateBulletinEvents(events []BulletinEvent) ptrace.Traces {
+	return ptrace.NewTraces()
+}
+
 func (t *eventTranslator) Cleanup() {
 	for k := range t.spanContextTracking {
 		if time.Now().After(t.spanContextTracking[k].ttl) {
@@ -144,11 +154,22 @@ func (t *eventTranslator) getServiceName(event ProvenanceEvent) string {
 	return event.ProcessGroupName
 }
 
+// getSpanKind returns the span kind for the event
+func (t *eventTranslator) getSpanKind(event ProvenanceEvent) trace.SpanKind {
+	switch event.EventType {
+	case ProvenanceEventTypeSend:
+		return trace.SpanKindClient
+	case ProvenanceEventTypeReceive:
+		return trace.SpanKindServer
+	default:
+		return trace.SpanKindInternal
+	}
+}
+
 // getSpanContext returns the span context for the event
 func (t *eventTranslator) getSpanContext(event ProvenanceEvent) trace.SpanContext {
 	// try to extract the span context from the event
-	spanCtx := extractTraceContext(event.UpdatedAttributes)
-	if spanCtx.IsValid() {
+	if spanCtx := extractTraceContext(event.UpdatedAttributes); spanCtx.IsValid() {
 		t.spanContextTracking[event.EntityId] = spanContextTracking{spanContext: spanCtx, ttl: time.Now().Add(5 * time.Minute)}
 		return spanCtx
 	}
@@ -160,13 +181,10 @@ func (t *eventTranslator) getSpanContext(event ProvenanceEvent) trace.SpanContex
 	// Fork events create a new span context, keep track of it,
 	// and connect it to all the childIds of the fork event
 	if event.EventType == ProvenanceEventTypeFork {
-		var traceID [16]byte
+		traceID := uuidToTraceID(event.EntityId)
 		parentSpanID := uuidToSpanID(event.EventId)
-		spanCtx, ok := t.spanContextTracking[event.EntityId]
-		if ok {
-			traceID = spanCtx.spanContext.TraceID()
-		} else {
-			traceID = uuidToTraceID(event.EntityId)
+		if ctx, ok := t.spanContextTracking[event.EntityId]; ok {
+			traceID = pcommon.TraceID(ctx.spanContext.TraceID())
 		}
 
 		childSpanCtx := trace.NewSpanContext(trace.SpanContextConfig{
@@ -179,8 +197,8 @@ func (t *eventTranslator) getSpanContext(event ProvenanceEvent) trace.SpanContex
 			t.spanContextTracking[childId] = spanContextTracking{spanContext: childSpanCtx, ttl: time.Now().Add(5 * time.Minute)}
 		}
 
-		if ok {
-			return spanCtx.spanContext
+		if ctx, ok := t.spanContextTracking[event.EntityId]; ok {
+			return ctx.spanContext
 		}
 
 		return defaultSpanCtx
