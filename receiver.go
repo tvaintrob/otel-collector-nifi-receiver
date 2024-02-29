@@ -49,13 +49,17 @@ func newNifiReceiver(config *Config, nextConsumer consumer.Traces, params receiv
 // Start the receiver and listen for traces
 func (r *nifiReceiver) Start(_ context.Context, host component.Host) error {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/provenance", r.handleTraces)
+	mux.HandleFunc(r.config.ProvenanceURLPath, r.handleTraces)
 
 	var err error
 	r.server, err = r.config.ServerConfig.ToServer(host, r.params.TelemetrySettings, mux)
 	if err != nil {
 		return fmt.Errorf("failed to create server definition: %w", err)
 	}
+
+	r.params.Logger.Info("Starting nifi receiver",
+		zap.String("endpoint", r.config.ServerConfig.Endpoint),
+		zap.String("provenance_url_path", r.config.ProvenanceURLPath))
 
 	hln, err := r.config.ServerConfig.ToListener()
 	if err != nil {

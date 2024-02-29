@@ -9,4 +9,5 @@ type Config struct {
 	confighttp.ServerConfig `mapstructure:",squash"`
 
 	IgnoredEventTypes []translator.ProvenanceEventType `mapstructure:"ignored_events,omitempty"`
+	ProvenanceURLPath string                           `mapstructure:"provenance_url_path,omitempty"`
 }

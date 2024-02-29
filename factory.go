@@ -28,6 +28,7 @@ func createDefaultConfig() component.Config {
 		IgnoredEventTypes: []translator.ProvenanceEventType{
 			translator.ProvenanceEventTypeDownload,
 		},
+		ProvenanceURLPath: "/v1/provenance",
 	}
 }
 
