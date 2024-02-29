@@ -36,6 +36,8 @@ import (
 	prometheusreceiver "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/prometheusreceiver"
 	kafkareceiver "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/kafkareceiver"
 	datadogreceiver "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/datadogreceiver"
+	jaegerreceiver "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/jaegerreceiver"
+	zipkinreceiver "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/zipkinreceiver"
 	nifireceiver "github.com/tvaintrob/otel-collector-nifi-receiver"
 )
 
@@ -59,6 +61,8 @@ func components() (otelcol.Factories, error) {
 		prometheusreceiver.NewFactory(),
 		kafkareceiver.NewFactory(),
 		datadogreceiver.NewFactory(),
+		jaegerreceiver.NewFactory(),
+		zipkinreceiver.NewFactory(),
 		nifireceiver.NewFactory(),
 	)
 	if err != nil {

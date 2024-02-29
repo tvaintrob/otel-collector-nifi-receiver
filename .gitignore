@@ -27,3 +27,11 @@ go.work
 # End of https://www.toptal.com/developers/gitignore/api/go
 
 cmd/otelcol-nifi/otelcol-nifi
+# Created by https://www.toptal.com/developers/gitignore/api/helm
+# Edit at https://www.toptal.com/developers/gitignore?templates=helm
+
+### Helm ###
+# Chart dependencies
+**/charts/*.tgz
+
+# End of https://www.toptal.com/developers/gitignore/api/helm
