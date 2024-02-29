@@ -20,7 +20,7 @@ make otelcol-nifi
 
 ## Configuration
 
-Example: 
+Example:
 
 ```yaml
 receivers:
@@ -28,11 +28,17 @@ receivers:
     endpoint: localhost:8200
 ```
 
+### provenance_url_path (Optional)
+
+The URL path to receive traces on.
+
+Default: `/v1/provenance`
+
 ### ignored_events (Optional)
 
 A list of event types to ignore, for a list of possible values see: [./internal/translator/models.go](./internal/translator/models.go)
 
-Default: 
+Default:
 
 ```yaml
 ignored_events:
@@ -44,3 +50,17 @@ ignored_events:
 All config params here are valid as well
 
 <https://github.com/open-telemetry/opentelemetry-collector/tree/main/config/confighttp#server-configuration>
+
+## Deployment
+
+### Docker
+
+#### Create a config file
+
+Initially create a config file to run the collector, for an example you can take a look at the [default-config.yaml](./cmd/otelcol-nifi/default-config.yaml) file.
+
+#### Run the image
+
+```bash
+docker run --rm -v ./collector-nifi-config.yaml:/etc/otel/config.yaml -t ghcr.io/tvaintrob/otel-collector-nifi-receiver:latest
+```
