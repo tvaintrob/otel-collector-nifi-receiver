@@ -64,3 +64,21 @@ Initially create a config file to run the collector, for an example you can take
 ```bash
 docker run --rm -v ./collector-nifi-config.yaml:/etc/otel/config.yaml -t ghcr.io/tvaintrob/otel-collector-nifi-receiver:latest
 ```
+
+### Kubernetes
+
+A helm chart is provided for easier deployments in K8s environments, currently it is unpublished, to use it do the following:
+
+#### Create a `values.yaml` file
+
+Create a `values.yaml` file with the wanted configuration.
+
+```bash
+git clone https://github.com/tvaintrob/otel-collector-nifi-receiver.git
+
+# Build chart dependencies
+helm dependency update otel-collector-nifi-receiver/deployments/helm
+
+# Install the chart using your values file
+helm install -f values.yaml otelcol-nifi otel-collector-nifi-receiver/deployments/helm
+```
