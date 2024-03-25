@@ -12,7 +12,7 @@ receivers:
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/datadogreceiver v0.95.0
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/jaegerreceiver v0.95.0
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/zipkinreceiver v0.95.0
-  - gomod: github.com/tvaintrob/otel-collector-nifi-receiver v0.1.1
+  - gomod: github.com/tvaintrob/otel-collector-nifi-receiver latest
     name: nifireceiver
 exporters:
   - gomod: go.opentelemetry.io/collector/exporter/debugexporter v0.95.0

@@ -17,13 +17,13 @@ import (
 )
 
 type nifiReceiver struct {
-	address      string
-	config       *Config
-	params       receiver.CreateSettings
-	nextConsumer consumer.Traces
-	server       *http.Server
-	tReceiver    *receiverhelper.ObsReport
-	translator   translator.EventTranslator
+	address         string
+	config          *Config
+	params          receiver.CreateSettings
+	nextConsumer    consumer.Traces
+	server          *http.Server
+	tReceiver       *receiverhelper.ObsReport
+	eventTranslator translator.EventTranslator
 }
 
 func newNifiReceiver(config *Config, nextConsumer consumer.Traces, params receiver.CreateSettings) (receiver.Traces, error) {
@@ -36,20 +36,22 @@ func newNifiReceiver(config *Config, nextConsumer consumer.Traces, params receiv
 		return nil, err
 	}
 
+	et := translator.NewEventTranslator(params.Logger, config.IgnoredEventTypes)
 	return &nifiReceiver{
-		params:       params,
-		config:       config,
-		nextConsumer: nextConsumer,
-		server:       &http.Server{},
-		tReceiver:    instance,
-		translator:   translator.New(config.IgnoredEventTypes),
+		params:          params,
+		config:          config,
+		nextConsumer:    nextConsumer,
+		server:          &http.Server{},
+		tReceiver:       instance,
+		eventTranslator: et,
 	}, nil
 }
 
 // Start the receiver and listen for traces
 func (r *nifiReceiver) Start(_ context.Context, host component.Host) error {
 	mux := http.NewServeMux()
-	mux.HandleFunc(r.config.ProvenanceURLPath, r.handleTraces)
+	mux.HandleFunc(r.config.BulletinURLPath, r.handleBulletinEvents)
+	mux.HandleFunc(r.config.ProvenanceURLPath, r.handleProvenanceEvents)
 
 	var err error
 	r.server, err = r.config.ServerConfig.ToServer(host, r.params.TelemetrySettings, mux)
@@ -81,7 +83,7 @@ func (r *nifiReceiver) Shutdown(ctx context.Context) (err error) {
 	return r.server.Shutdown(ctx)
 }
 
-func (r *nifiReceiver) handleTraces(w http.ResponseWriter, req *http.Request) {
+func (r *nifiReceiver) handleProvenanceEvents(w http.ResponseWriter, req *http.Request) {
 	obsCtx := r.tReceiver.StartTracesOp(req.Context())
 	var err error
 	var spanCount int
@@ -98,7 +100,7 @@ func (r *nifiReceiver) handleTraces(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	traces := r.translator.TranslateProvenanceEvents(provenanceEvents)
+	traces := r.eventTranslator.TranslateProvenanceEvents(provenanceEvents)
 	spanCount = traces.SpanCount()
 	err = r.nextConsumer.ConsumeTraces(obsCtx, traces)
 	if err != nil {
@@ -107,6 +109,36 @@ func (r *nifiReceiver) handleTraces(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	r.translator.Cleanup()
+	r.eventTranslator.Cleanup()
+	_, _ = w.Write([]byte("OK"))
+}
+
+func (r *nifiReceiver) handleBulletinEvents(w http.ResponseWriter, req *http.Request) {
+	obsCtx := r.tReceiver.StartTracesOp(req.Context())
+	var err error
+	var spanCount int
+	var bulletinEvents []translator.BulletinEvent
+	defer func(spanCount *int) {
+		r.tReceiver.EndTracesOp(obsCtx, metadata.Type.String(), *spanCount, err)
+	}(&spanCount)
+
+	jsonDecoder := json.NewDecoder(req.Body)
+	err = jsonDecoder.Decode(&bulletinEvents)
+	if err != nil {
+		http.Error(w, "Failed to decode JSON", http.StatusBadRequest)
+		r.params.Logger.Error("Failed to decode JSON", zap.Error(err))
+		return
+	}
+
+	traces := r.eventTranslator.TranslateBulletinEvents(bulletinEvents)
+	spanCount = traces.SpanCount()
+	err = r.nextConsumer.ConsumeTraces(obsCtx, traces)
+	if err != nil {
+		http.Error(w, "Failed to consume traces", http.StatusInternalServerError)
+		r.params.Logger.Error("Failed to consume traces", zap.Error(err))
+		return
+	}
+
+	r.eventTranslator.Cleanup()
 	_, _ = w.Write([]byte("OK"))
 }

@@ -10,11 +10,15 @@ import (
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
 	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/zap"
 )
 
 type EventTranslator interface {
 	// TranslateProvenanceEvents translates a slice of ProvenanceEvent into a ptrace.Traces
 	TranslateProvenanceEvents(events []ProvenanceEvent) ptrace.Traces
+
+	// TranslateBulletinEvents translates a slice of BulletinEvent into a ptrace.Traces
+	TranslateBulletinEvents(events []BulletinEvent) ptrace.Traces
 
 	// Cleanup cleans up the translator
 	Cleanup()
@@ -26,19 +30,21 @@ type spanContextTracking struct {
 }
 
 type eventTranslator struct {
+	logger            *zap.Logger
 	ignoredEventTypes map[ProvenanceEventType]bool
 
 	// Keep track of the span context for each event.EntityId
 	spanContextTracking map[string]spanContextTracking
 }
 
-func New(ignoredEventTypes []ProvenanceEventType) EventTranslator {
+func NewEventTranslator(logger *zap.Logger, ignoredEventTypes []ProvenanceEventType) EventTranslator {
 	ignoredEventsMap := make(map[ProvenanceEventType]bool)
 	for _, eventType := range ignoredEventTypes {
 		ignoredEventsMap[eventType] = true
 	}
 
 	return &eventTranslator{
+		logger:              logger,
 		ignoredEventTypes:   ignoredEventsMap,
 		spanContextTracking: make(map[string]spanContextTracking),
 	}
@@ -52,6 +58,7 @@ func (t *eventTranslator) TranslateProvenanceEvents(events []ProvenanceEvent) pt
 			continue
 		}
 
+		kind := t.getSpanKind(event)
 		serviceName := t.getServiceName(event)
 		slice, exist := groupByService[serviceName]
 		if !exist {
@@ -61,6 +68,7 @@ func (t *eventTranslator) TranslateProvenanceEvents(events []ProvenanceEvent) pt
 
 		spanCtx := t.getSpanContext(event)
 		newSpan := slice.AppendEmpty()
+		newSpan.SetKind(ptrace.SpanKind(kind))
 		newSpan.SetTraceID(pcommon.TraceID(spanCtx.TraceID()))
 		newSpan.SetParentSpanID(pcommon.SpanID(spanCtx.SpanID()))
 		newSpan.SetSpanID(uuidToSpanID(event.EventId))
@@ -125,6 +133,97 @@ func (t *eventTranslator) TranslateProvenanceEvents(events []ProvenanceEvent) pt
 	return results
 }
 
+// TranslateBulletinEvents translates a slice of BulletinEvent into a ptrace.Traces
+func (t *eventTranslator) TranslateBulletinEvents(events []BulletinEvent) ptrace.Traces {
+	groupByService := make(map[string]ptrace.SpanSlice)
+	for _, event := range events {
+		serviceName := event.BulletinGroupName
+		slice, exist := groupByService[serviceName]
+		if !exist {
+			slice = ptrace.NewSpanSlice()
+			groupByService[serviceName] = slice
+		}
+
+		if len(event.BulletinFlowFileUuid) == 0 {
+			t.logger.Warn("received event with empty flowfile uuid", zap.Any("event", event))
+			continue
+		}
+
+		defaultSpanCtx := trace.NewSpanContext(trace.SpanContextConfig{
+			TraceID: trace.TraceID(uuidToTraceID(event.BulletinFlowFileUuid)),
+		})
+
+		ctx, ok := t.spanContextTracking[event.BulletinFlowFileUuid]
+		if !ok {
+			ctx.spanContext = defaultSpanCtx
+		}
+
+		newSpan := slice.AppendEmpty()
+		newSpan.SetKind(ptrace.SpanKindInternal)
+		newSpan.SetSpanID(uuidToSpanID(event.ObjectId))
+		newSpan.SetTraceID(pcommon.TraceID(ctx.spanContext.TraceID()))
+		newSpan.SetParentSpanID(pcommon.SpanID(ctx.spanContext.SpanID()))
+
+		switch strings.ToLower(event.BulletinLevel) {
+		case "error":
+			newSpan.Status().SetCode(ptrace.StatusCodeError)
+		default:
+			newSpan.Status().SetCode(ptrace.StatusCodeUnset)
+		}
+
+		newSpan.SetName(fmt.Sprintf("%s %s", event.BulletinSourceName, event.BulletinLevel))
+
+		ts, err := time.Parse("2006-01-02T15:04:05.999Z", event.BulletinTimestamp)
+		if err != nil {
+			t.logger.Error("failed to parse timestamp for event",
+				zap.String("object.id", event.ObjectId),
+				zap.Int64("bulletin.id", event.BulletinId))
+			continue
+		}
+
+		newSpan.SetStartTimestamp(pcommon.Timestamp(ts.UnixMilli() * 1000000))
+		newSpan.SetEndTimestamp(pcommon.Timestamp(ts.UnixMilli() * 1000000)) // Bulletin events dont have any duration
+
+		newSpan.Attributes().PutStr("nifi.object.id", event.ObjectId)
+		newSpan.Attributes().PutStr("nifi.platform", event.Platform)
+		newSpan.Attributes().PutInt("nifi.bulletin.id", event.BulletinId)
+		newSpan.Attributes().PutStr("nifi.bulletin.category", event.BulletinCategory)
+		newSpan.Attributes().PutStr("nifi.bulletin.group.id", event.BulletinGroupId)
+		newSpan.Attributes().PutStr("nifi.bulletin.group.name", event.BulletinGroupName)
+		newSpan.Attributes().PutStr("nifi.bulletin.group.path", event.BulletinGroupPath)
+		newSpan.Attributes().PutStr("nifi.bulletin.level", event.BulletinLevel)
+		newSpan.Attributes().PutStr("nifi.bulletin.message", event.BulletinMessage)
+		newSpan.Attributes().PutStr("nifi.bulletin.node.address", event.BulletinNodeAddress)
+		newSpan.Attributes().PutStr("nifi.bulletin.node.id", event.BulletinNodeId)
+		newSpan.Attributes().PutStr("nifi.bulletin.source.id", event.BulletinSourceId)
+		newSpan.Attributes().PutStr("nifi.bulletin.source.name", event.BulletinSourceName)
+		newSpan.Attributes().PutStr("nifi.bulletin.source.type", event.BulletinSourceType)
+		newSpan.Attributes().PutStr("nifi.bulletin.flowfile.id", event.BulletinFlowFileUuid)
+	}
+
+	results := ptrace.NewTraces()
+	for service, spans := range groupByService {
+		rs := results.ResourceSpans().AppendEmpty()
+		rs.SetSchemaUrl(semconv.SchemaURL)
+		rs.Resource().Attributes().PutStr(string(semconv.ServiceNameKey), service)
+
+		in := rs.ScopeSpans().AppendEmpty()
+		in.Scope().SetName("nifi.provenance.receiver")
+
+		info, ok := debug.ReadBuildInfo()
+		if ok {
+			in.Scope().SetVersion(info.Main.Version)
+		} else {
+			in.Scope().SetVersion("unknown")
+		}
+
+		spans.CopyTo(in.Spans())
+	}
+
+	return results
+
+}
+
 func (t *eventTranslator) Cleanup() {
 	for k := range t.spanContextTracking {
 		if time.Now().After(t.spanContextTracking[k].ttl) {
@@ -144,11 +243,22 @@ func (t *eventTranslator) getServiceName(event ProvenanceEvent) string {
 	return event.ProcessGroupName
 }
 
+// getSpanKind returns the span kind for the event
+func (t *eventTranslator) getSpanKind(event ProvenanceEvent) trace.SpanKind {
+	switch event.EventType {
+	case ProvenanceEventTypeSend:
+		return trace.SpanKindClient
+	case ProvenanceEventTypeReceive:
+		return trace.SpanKindServer
+	default:
+		return trace.SpanKindInternal
+	}
+}
+
 // getSpanContext returns the span context for the event
 func (t *eventTranslator) getSpanContext(event ProvenanceEvent) trace.SpanContext {
 	// try to extract the span context from the event
-	spanCtx := extractTraceContext(event.UpdatedAttributes)
-	if spanCtx.IsValid() {
+	if spanCtx := extractTraceContext(event.UpdatedAttributes); spanCtx.IsValid() {
 		t.spanContextTracking[event.EntityId] = spanContextTracking{spanContext: spanCtx, ttl: time.Now().Add(5 * time.Minute)}
 		return spanCtx
 	}
@@ -160,13 +270,10 @@ func (t *eventTranslator) getSpanContext(event ProvenanceEvent) trace.SpanContex
 	// Fork events create a new span context, keep track of it,
 	// and connect it to all the childIds of the fork event
 	if event.EventType == ProvenanceEventTypeFork {
-		var traceID [16]byte
+		traceID := uuidToTraceID(event.EntityId)
 		parentSpanID := uuidToSpanID(event.EventId)
-		spanCtx, ok := t.spanContextTracking[event.EntityId]
-		if ok {
-			traceID = spanCtx.spanContext.TraceID()
-		} else {
-			traceID = uuidToTraceID(event.EntityId)
+		if ctx, ok := t.spanContextTracking[event.EntityId]; ok {
+			traceID = pcommon.TraceID(ctx.spanContext.TraceID())
 		}
 
 		childSpanCtx := trace.NewSpanContext(trace.SpanContextConfig{
@@ -179,8 +286,8 @@ func (t *eventTranslator) getSpanContext(event ProvenanceEvent) trace.SpanContex
 			t.spanContextTracking[childId] = spanContextTracking{spanContext: childSpanCtx, ttl: time.Now().Add(5 * time.Minute)}
 		}
 
-		if ok {
-			return spanCtx.spanContext
+		if ctx, ok := t.spanContextTracking[event.EntityId]; ok {
+			return ctx.spanContext
 		}
 
 		return defaultSpanCtx

@@ -32,6 +32,26 @@ type ProvenanceEvent struct {
 	TransitUri          string              `json:"transitUri,omitempty"`
 }
 
+// BulletinEvent is a struct that represents a single bulletin event
+type BulletinEvent struct {
+	ObjectId             string `json:"objectId"`
+	Platform             string `json:"platform"`
+	BulletinId           int64  `json:"bulletinId"`
+	BulletinCategory     string `json:"bulletinCategory,omitempty"`
+	BulletinGroupId      string `json:"bulletinGroupId,omitempty"`
+	BulletinGroupName    string `json:"bulletinGroupName,omitempty"`
+	BulletinGroupPath    string `json:"bulletinGroupPath,omitempty"`
+	BulletinLevel        string `json:"bulletinLevel,omitempty"`
+	BulletinMessage      string `json:"bulletinMessage,omitempty"`
+	BulletinNodeAddress  string `json:"bulletinNodeAddress,omitempty"`
+	BulletinNodeId       string `json:"bulletinNodeId,omitempty"`
+	BulletinSourceId     string `json:"bulletinSourceId,omitempty"`
+	BulletinSourceName   string `json:"bulletinSourceName,omitempty"`
+	BulletinSourceType   string `json:"bulletinSourceType,omitempty"`
+	BulletinTimestamp    string `json:"bulletinTimestamp,omitempty"` // Format: yyyy-MM-dd'T'HH:mm:ss.SSS'Z'
+	BulletinFlowFileUuid string `json:"bulletinFlowFileUuid,omitempty"`
+}
+
 // ProvenanceEventType is a type that represents the type of a provenance event
 type ProvenanceEventType string
 
