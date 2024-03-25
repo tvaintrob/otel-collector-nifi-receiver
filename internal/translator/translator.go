@@ -144,10 +144,32 @@ func (t *eventTranslator) TranslateBulletinEvents(events []BulletinEvent) ptrace
 			groupByService[serviceName] = slice
 		}
 
+		if len(event.BulletinFlowFileUuid) == 0 {
+			t.logger.Warn("received event with empty flowfile uuid", zap.Any("event", event))
+			continue
+		}
+
+		defaultSpanCtx := trace.NewSpanContext(trace.SpanContextConfig{
+			TraceID: trace.TraceID(uuidToTraceID(event.BulletinFlowFileUuid)),
+		})
+
+		ctx, ok := t.spanContextTracking[event.BulletinFlowFileUuid]
+		if !ok {
+			ctx.spanContext = defaultSpanCtx
+		}
+
 		newSpan := slice.AppendEmpty()
 		newSpan.SetKind(ptrace.SpanKindInternal)
 		newSpan.SetSpanID(uuidToSpanID(event.ObjectId))
-        newSpan.SetTraceID(uuidToTraceID(event.BulletinGroupId))
+		newSpan.SetTraceID(pcommon.TraceID(ctx.spanContext.TraceID()))
+		newSpan.SetParentSpanID(pcommon.SpanID(ctx.spanContext.SpanID()))
+
+		switch strings.ToLower(event.BulletinLevel) {
+		case "error":
+			newSpan.Status().SetCode(ptrace.StatusCodeError)
+		default:
+			newSpan.Status().SetCode(ptrace.StatusCodeUnset)
+		}
 
 		newSpan.SetName(fmt.Sprintf("%s %s", event.BulletinSourceName, event.BulletinLevel))
 
