@@ -34,19 +34,21 @@ type eventTranslator struct {
 	ignoredEventTypes map[ProvenanceEventType]bool
 
 	// Keep track of the span context for each event.EntityId
-	spanContextTracking map[string]spanContextTracking
+	spanContextTracking       map[string]spanContextTracking
+	contextPropagationAliases map[string]string
 }
 
-func NewEventTranslator(logger *zap.Logger, ignoredEventTypes []ProvenanceEventType) EventTranslator {
+func NewEventTranslator(logger *zap.Logger, ignoredEventTypes []ProvenanceEventType, contextPropagationAliases map[string]string) EventTranslator {
 	ignoredEventsMap := make(map[ProvenanceEventType]bool)
 	for _, eventType := range ignoredEventTypes {
 		ignoredEventsMap[eventType] = true
 	}
 
 	return &eventTranslator{
-		logger:              logger,
-		ignoredEventTypes:   ignoredEventsMap,
-		spanContextTracking: make(map[string]spanContextTracking),
+		logger:                    logger,
+		ignoredEventTypes:         ignoredEventsMap,
+		spanContextTracking:       make(map[string]spanContextTracking),
+		contextPropagationAliases: contextPropagationAliases,
 	}
 }
 
@@ -74,8 +76,8 @@ func (t *eventTranslator) TranslateProvenanceEvents(events []ProvenanceEvent) pt
 		newSpan.SetSpanID(uuidToSpanID(event.EventId))
 
 		newSpan.SetName(fmt.Sprintf("%s %s", event.ComponentName, event.EventType))
-		newSpan.SetStartTimestamp(pcommon.Timestamp(event.TimestampMillis * 1000000))
-		newSpan.SetEndTimestamp(pcommon.Timestamp((event.TimestampMillis + event.DurationMillis) * 1000000))
+		newSpan.SetEndTimestamp(pcommon.Timestamp(event.TimestampMillis * 1000000))
+		newSpan.SetStartTimestamp(pcommon.Timestamp((event.TimestampMillis - event.DurationMillis) * 1000000))
 
 		newSpan.Attributes().PutStr("nifi.event.id", event.EventId)
 		newSpan.Attributes().PutStr("nifi.event.type", string(event.EventType))
@@ -258,9 +260,11 @@ func (t *eventTranslator) getSpanKind(event ProvenanceEvent) trace.SpanKind {
 // getSpanContext returns the span context for the event
 func (t *eventTranslator) getSpanContext(event ProvenanceEvent) trace.SpanContext {
 	// try to extract the span context from the event
-	if spanCtx := extractTraceContext(event.UpdatedAttributes); spanCtx.IsValid() {
-		t.spanContextTracking[event.EntityId] = spanContextTracking{spanContext: spanCtx, ttl: time.Now().Add(5 * time.Minute)}
-		return spanCtx
+	if event.EventType == ProvenanceEventTypeCreate || event.EventType == ProvenanceEventTypeReceive {
+		if spanCtx := extractTraceContext(event.UpdatedAttributes, t.contextPropagationAliases); spanCtx.IsValid() {
+			t.spanContextTracking[event.EntityId] = spanContextTracking{spanContext: spanCtx, ttl: time.Now().Add(5 * time.Minute)}
+			return spanCtx
+		}
 	}
 
 	defaultSpanCtx := trace.NewSpanContext(trace.SpanContextConfig{

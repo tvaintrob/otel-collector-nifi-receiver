@@ -36,7 +36,7 @@ func newNifiReceiver(config *Config, nextConsumer consumer.Traces, params receiv
 		return nil, err
 	}
 
-	et := translator.NewEventTranslator(params.Logger, config.IgnoredEventTypes)
+	et := translator.NewEventTranslator(params.Logger, config.IgnoredEventTypes, config.ContextPropagationAliases)
 	return &nifiReceiver{
 		params:          params,
 		config:          config,
