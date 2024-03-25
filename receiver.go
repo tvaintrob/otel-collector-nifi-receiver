@@ -36,13 +36,14 @@ func newNifiReceiver(config *Config, nextConsumer consumer.Traces, params receiv
 		return nil, err
 	}
 
+	et := translator.NewEventTranslator(params.Logger, config.IgnoredEventTypes)
 	return &nifiReceiver{
 		params:          params,
 		config:          config,
 		nextConsumer:    nextConsumer,
 		server:          &http.Server{},
 		tReceiver:       instance,
-		eventTranslator: translator.NewProvenanceEventTranslator(config.IgnoredEventTypes),
+		eventTranslator: et,
 	}, nil
 }
 
