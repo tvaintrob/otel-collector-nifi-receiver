@@ -3,6 +3,7 @@ package translator
 import (
 	"fmt"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"time"
 
@@ -38,7 +39,11 @@ type eventTranslator struct {
 	contextPropagationAliases map[string]string
 }
 
-func NewEventTranslator(logger *zap.Logger, ignoredEventTypes []ProvenanceEventType, contextPropagationAliases map[string]string) EventTranslator {
+func NewEventTranslator(
+	logger *zap.Logger,
+	ignoredEventTypes []ProvenanceEventType,
+	contextPropagationAliases map[string]string,
+) EventTranslator {
 	ignoredEventsMap := make(map[ProvenanceEventType]bool)
 	for _, eventType := range ignoredEventTypes {
 		ignoredEventsMap[eventType] = true
@@ -55,6 +60,10 @@ func NewEventTranslator(logger *zap.Logger, ignoredEventTypes []ProvenanceEventT
 // TranslateProvenanceEvents translates a slice of ProvenanceEvent into a ptrace.Traces
 func (t *eventTranslator) TranslateProvenanceEvents(events []ProvenanceEvent) ptrace.Traces {
 	groupByService := make(map[string]ptrace.SpanSlice)
+	slices.SortFunc(events, func(a ProvenanceEvent, b ProvenanceEvent) int {
+		return int(a.EventOrdinal) - int(b.EventOrdinal)
+	})
+
 	for _, event := range events {
 		if t.shouldIgnore(event) {
 			continue
@@ -77,7 +86,9 @@ func (t *eventTranslator) TranslateProvenanceEvents(events []ProvenanceEvent) pt
 
 		newSpan.SetName(fmt.Sprintf("%s %s", event.ComponentName, event.EventType))
 		newSpan.SetEndTimestamp(pcommon.Timestamp(event.TimestampMillis * 1000000))
-		newSpan.SetStartTimestamp(pcommon.Timestamp((event.TimestampMillis - event.DurationMillis) * 1000000))
+		newSpan.SetStartTimestamp(
+			pcommon.Timestamp((event.TimestampMillis - event.DurationMillis) * 1000000),
+		)
 
 		newSpan.Attributes().PutStr("nifi.event.id", event.EventId)
 		newSpan.Attributes().PutStr("nifi.event.type", string(event.EventType))
@@ -95,7 +106,9 @@ func (t *eventTranslator) TranslateProvenanceEvents(events []ProvenanceEvent) pt
 		newSpan.Attributes().PutStr("nifi.application", event.Application)
 
 		for key, val := range event.UpdatedAttributes {
-			newSpan.Attributes().PutStr(fmt.Sprintf("nifi.attributes.%s", strings.ToLower(key)), val)
+			newSpan.
+				Attributes().
+				PutStr(fmt.Sprintf("nifi.attributes.%s", strings.ToLower(key)), val)
 		}
 
 		if event.EventType == ProvenanceEventTypeJoin {
@@ -184,7 +197,9 @@ func (t *eventTranslator) TranslateBulletinEvents(events []BulletinEvent) ptrace
 		}
 
 		newSpan.SetStartTimestamp(pcommon.Timestamp(ts.UnixMilli() * 1000000))
-		newSpan.SetEndTimestamp(pcommon.Timestamp(ts.UnixMilli() * 1000000)) // Bulletin events dont have any duration
+		newSpan.SetEndTimestamp(
+			pcommon.Timestamp(ts.UnixMilli() * 1000000),
+		) // Bulletin events dont have any duration
 
 		newSpan.Attributes().PutStr("nifi.object.id", event.ObjectId)
 		newSpan.Attributes().PutStr("nifi.platform", event.Platform)
@@ -260,11 +275,30 @@ func (t *eventTranslator) getSpanKind(event ProvenanceEvent) trace.SpanKind {
 // getSpanContext returns the span context for the event
 func (t *eventTranslator) getSpanContext(event ProvenanceEvent) trace.SpanContext {
 	// try to extract the span context from the event
-	if event.EventType == ProvenanceEventTypeCreate || event.EventType == ProvenanceEventTypeReceive {
+	if event.EventType == ProvenanceEventTypeCreate ||
+		event.EventType == ProvenanceEventTypeReceive {
 		if spanCtx := extractTraceContext(event.UpdatedAttributes, t.contextPropagationAliases); spanCtx.IsValid() {
-			t.spanContextTracking[event.EntityId] = spanContextTracking{spanContext: spanCtx, ttl: time.Now().Add(5 * time.Minute)}
+			t.spanContextTracking[event.EntityId] = spanContextTracking{
+				spanContext: spanCtx,
+				ttl:         time.Now().Add(5 * time.Minute),
+			}
 			return spanCtx
 		}
+
+		ctx := trace.NewSpanContext(trace.SpanContextConfig{
+			TraceFlags: 0,
+			SpanID:     trace.SpanID(uuidToSpanID(event.EventId)),
+			TraceID:    trace.TraceID(uuidToTraceID(event.EntityId)),
+		})
+
+		t.spanContextTracking[event.EntityId] = spanContextTracking{
+			spanContext: ctx,
+			ttl:         time.Now().Add(5 * time.Minute),
+		}
+
+		return trace.NewSpanContext(trace.SpanContextConfig{
+			TraceID: trace.TraceID(uuidToTraceID(event.EntityId)),
+		})
 	}
 
 	defaultSpanCtx := trace.NewSpanContext(trace.SpanContextConfig{
@@ -273,7 +307,7 @@ func (t *eventTranslator) getSpanContext(event ProvenanceEvent) trace.SpanContex
 
 	// Fork events create a new span context, keep track of it,
 	// and connect it to all the childIds of the fork event
-	if event.EventType == ProvenanceEventTypeFork {
+	if event.EventType == ProvenanceEventTypeFork || event.EventType == ProvenanceEventTypeClone {
 		traceID := uuidToTraceID(event.EntityId)
 		parentSpanID := uuidToSpanID(event.EventId)
 		if ctx, ok := t.spanContextTracking[event.EntityId]; ok {
@@ -287,7 +321,10 @@ func (t *eventTranslator) getSpanContext(event ProvenanceEvent) trace.SpanContex
 		})
 
 		for _, childId := range event.ChildIds {
-			t.spanContextTracking[childId] = spanContextTracking{spanContext: childSpanCtx, ttl: time.Now().Add(5 * time.Minute)}
+			t.spanContextTracking[childId] = spanContextTracking{
+				spanContext: childSpanCtx,
+				ttl:         time.Now().Add(5 * time.Minute),
+			}
 		}
 
 		if ctx, ok := t.spanContextTracking[event.EntityId]; ok {
